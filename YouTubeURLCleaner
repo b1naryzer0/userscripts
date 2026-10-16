@@ -1,0 +1,58 @@
+// ==UserScript==
+// @name         YouTube URL Cleaner (Hardcore & Shorts Convert)
+// @namespace    Violentmonkey Scripts
+// @version      1.2
+// @description  Bereinigt rigoros alle YouTube-URLs und wandelt Shorts in normale Videos um.
+// @author       80sKid (b1naryzer0)
+// @match        https://www.youtube.com/*
+// @grant        none
+// @run-at       document-start
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function cleanYouTubeURL() {
+        const href = window.location.href;
+
+        // 1. YouTube Shorts in normale Videos umwandeln
+        if (window.location.pathname.startsWith('/shorts/')) {
+            const shortId = window.location.pathname.split('/shorts/')[1].split(/[?#]/)[0];
+            if (shortId) {
+                window.history.replaceState({}, document.title, `/watch?v=${shortId}`);
+                return;
+            }
+        }
+
+        // 2. Normale Video-Seiten bereinigen
+        if (window.location.pathname.startsWith('/watch')) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const videoId = urlParams.get('v');
+
+            if (videoId) {
+                const cleanSearch = `?v=${videoId}`;
+                // Nur ersetzen, wenn noch andere Parameter vorhanden sind
+                if (window.location.search !== cleanSearch) {
+                    window.history.replaceState({}, document.title, window.location.pathname + cleanSearch);
+                }
+            }
+        }
+    }
+
+    // Sofort beim Laden ausführen
+    cleanYouTubeURL();
+
+    // YouTube-Event abfangen (für schnelle Klicks auf der Seite)
+    window.addEventListener('yt-navigate-finish', cleanYouTubeURL);
+
+    // MutationObserver als Sicherheitsnetz: Überwacht Änderungen am Seitentitel/Header,
+    // um YouTubes "Zurückschreiben" der Playlist-URL sofort zu kontern.
+    const observer = new MutationObserver(() => {
+        cleanYouTubeURL();
+    });
+
+    // Sobald das Dokument bereit ist, starten wir die Dauerüberwachung
+    document.addEventListener('DOMContentLoaded', () => {
+        observer.observe(document.head, { subtree: true, childList: true });
+    });
+})();
