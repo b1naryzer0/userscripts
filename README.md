@@ -1,2 +1,2 @@
 # userscripts
-Userscripts for Tampermonkey etc.
+Userscripts for Violentmonkey, Tampermonkey et al
