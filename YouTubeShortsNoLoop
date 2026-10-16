@@ -1,0 +1,33 @@
+// ==UserScript==
+// @name         YouTube Shorts Auto-Loop Deaktivieren
+// @namespace    https://youtube.com/
+// @version      0.1
+// @description  deactivates the automatic repeat (loop) on YouTube Shorts
+// @author       80sKid
+// description   on demand of and for Javier Giménez (greetings!)
+// @match        https://www.youtube.com/*
+// @grant        none
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // function that removes the 'loop' attribute from the video element
+    function disableLoop() {
+        // finds the video element within the Shorts player
+        const videos = document.querySelectorAll('video');
+
+        videos.forEach(video => {
+            // apply only to ‘shorts’ pages and only if the ‘loop’ attribute is set
+            if (window.location.href.includes('/shorts/') && video.loop) {
+                video.loop = false;
+                // additional safeguard: delete the HTML attribute directly
+                video.removeAttribute('loop');
+            }
+        });
+    }
+
+    // interval for detecting dynamically loaded videos (when scrolling to the next short)
+    setInterval(disableLoop, 500);
+})();
