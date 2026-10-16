@@ -12,22 +12,14 @@
 
 (function() {
     'use strict';
-
-    // function that removes the 'loop' attribute from the video element
     function disableLoop() {
-        // finds the video element within the Shorts player
         const videos = document.querySelectorAll('video');
-
         videos.forEach(video => {
-            // apply only to ‘shorts’ pages and only if the ‘loop’ attribute is set
             if (window.location.href.includes('/shorts/') && video.loop) {
                 video.loop = false;
-                // additional safeguard: delete the HTML attribute directly
                 video.removeAttribute('loop');
             }
         });
     }
-
-    // interval for detecting dynamically loaded videos (when scrolling to the next short)
     setInterval(disableLoop, 500);
 })();
