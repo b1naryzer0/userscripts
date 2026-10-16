@@ -1,0 +1,131 @@
+// ==UserScript==
+// @name         YouTube No Translation (Violentmonkey Version)
+// @namespace    https://github.com/YouG-o/YouTube_No_Translation
+// @version      1.0
+// @description  Verhindert automatische Übersetzungen von Titeln, Beschreibungen, Audio-Tracks und Thumbnails.
+// @author       80sKid
+// @match        https://www.youtube.com/*
+// @grant        none
+// @run-at       document-start
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Funktion, um die Rohdaten von YouTube zu manipulieren
+    function untranslateData(obj) {
+        if (!obj) return;
+
+        // 1. VIDEOTITEL & BESCHREIBUNGEN (im Player-Response-Objekt)
+        if (obj.videoDetails) {
+            // Falls YouTube eine Übersetzung erzwingt, überschreiben wir sie mit den Originaldaten
+            if (obj.videoDetails.originalTitle) {
+                obj.videoDetails.title = obj.videoDetails.originalTitle;
+            }
+        }
+
+        // 2. AUDIO-TRACKS (Verhindert ungewolltes KI-Dubbing/Synchronisation)
+        // Setzt die Audiospur standardmäßig strikt auf das Original ("audioTrackId": "original")
+        if (obj.playerConfig && obj.playerConfig.audioConfig) {
+            if (obj.playerConfig.audioConfig.defaultAudioTrackId) {
+                obj.playerConfig.audioConfig.defaultAudioTrackId = "original";
+            }
+        }
+        if (obj.streamingData && obj.streamingData.adaptiveFormats) {
+            // Filtert lokalisierte/übersetzte Tonspuren heraus, falls vorhanden
+            obj.streamingData.adaptiveFormats.forEach(format => {
+                if (format.audioTrack && format.audioTrack.audioTrackId && format.audioTrack.audioTrackId !== "original") {
+                    // Markiert andere Sprachen als nicht-standardmäßig
+                    format.audioTrack.isDefault = false;
+                }
+            });
+        }
+
+        // 3. SEITEN-METADATEN (Für Suche und Kanalseiten)
+        // Verhindert, dass Titel in der Suche oder in den Empfehlungen übersetzt werden
+        if (obj.contents) {
+            const strData = JSON.stringify(obj);
+            // Wenn übersetzte Titel-Metadaten im JSON-String auftauchen, biegen wir sie um
+            if (strData.includes('translatedTitle') || strData.includes('originalVideoTitle')) {
+                // Tiefere rekursive Suche nach Titeln in Listenelementen
+                cleanRenderers(obj);
+            }
+        }
+    }
+
+    // Hilfsfunktion für Suchergebnisse und Feeds
+    function cleanRenderers(node) {
+        if (!node || typeof node !== 'object') return;
+
+        // Wenn ein Video-Renderer gefunden wird, der Original-Titel erzwingen
+        if (node.videoRenderer && node.videoRenderer.title && node.videoRenderer.title.runs) {
+            if (node.videoRenderer.originalTitle && node.videoRenderer.originalTitle.runs) {
+                node.videoRenderer.title = node.videoRenderer.originalTitle;
+            }
+        }
+
+        // Durch das gesamte Objekt hangeln
+        for (let key in node) {
+            if (node.hasOwnProperty(key)) {
+                cleanRenderers(node[key]);
+            }
+        }
+    }
+
+    // --- ABFANGEN DER INITIALEN DATENSTRÖME ---
+
+    // YouTube hinterlegt die Daten beim ersten Laden in globalen Window-Variablen
+    let initialPlayerResponse = window.ytInitialPlayerResponse;
+    Object.defineProperty(window, 'ytInitialPlayerResponse', {
+        get() { return initialPlayerResponse; },
+        set(newValue) {
+            untranslateData(newValue);
+            initialPlayerResponse = newValue;
+        },
+        configurable: true
+    });
+
+    let initialData = window.ytInitialData;
+    Object.defineProperty(window, 'ytInitialData', {
+        get() { return initialData; },
+        set(newValue) {
+            untranslateData(newValue);
+            initialData = newValue;
+        },
+        configurable: true
+    });
+
+    // --- ABFANGEN DER DYNAMISCHEN AJAX-NETZWERKAUFRUFE (SPA-Navigation) ---
+    // YouTube lädt neue Videos via "fetch" nach. Das fangen wir hier ab.
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const response = await originalFetch.apply(this, args);
+        const url = args[0];
+
+        // Prüfen, ob es sich um YouTubes interne Daten-API handelt
+        if (typeof url === 'string' && (url.includes('/youtubei/v1/player') || url.includes('/youtubei/v1/browse') || url.includes('/youtubei/v1/search'))) {
+            // Antwort klonen, um sie manipulieren zu können
+            const clone = response.clone();
+            const jsonPromise = clone.json().then(data => {
+                untranslateData(data);
+                return data;
+            });
+
+            // Erstellt eine manipulierte Response für YouTube
+            return new Response(new ReadableStream({
+                async start(controller) {
+                    const data = await jsonPromise;
+                    controller.enqueue(new TextEncoder().encode(JSON.stringify(data)));
+                    controller.close();
+                }
+            }), {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+            });
+        }
+
+        return response;
+    };
+
+})();
