@@ -1,2 +1,2 @@
 # userscripts
-Userscripts for Violentmonkey, Tampermonkey et al
+Userscripts for Violentmonkey and similar userscript manager extensions for your browser
