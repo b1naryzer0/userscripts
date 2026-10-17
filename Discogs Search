@@ -1,0 +1,75 @@
+// ==UserScript==
+// @name         Discogs Search
+// @namespace    https://discogs.com
+// @version      1.2
+// @description  Displays the Discogs search button right next to the original browser context menu.
+// @author       80sKid
+// @match        *://*/*
+// @grant        GM_openInTab
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const menuBtn = document.createElement('div');
+    menuBtn.textContent = '🔍 Search on Discogs';
+
+    Object.assign(menuBtn.style, {
+        position: 'absolute',
+        display: 'none',
+        zIndex: '9999999', 
+        backgroundColor: '#2b2b2b',
+        color: '#ffffff',
+        padding: '8px 14px',
+        borderRadius: '6px',
+        boxShadow: '0px 5px 15px rgba(0,0,0,0.4)',
+        cursor: 'pointer',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        fontSize: '13px',
+        fontWeight: '600',
+        userSelect: 'none',
+        border: '1px solid #555',
+        transition: 'background-color 0.15s ease'
+    });
+
+    menuBtn.addEventListener('mouseenter', () => menuBtn.style.backgroundColor = '#444444');
+    menuBtn.addEventListener('mouseleave', () => menuBtn.style.backgroundColor = '#2b2b2b');
+
+    document.body.appendChild(menuBtn);
+
+    let selectedText = '';
+
+    document.addEventListener('contextmenu', function(e) {
+        const selection = window.getSelection().toString().trim();
+
+        if (selection) {
+            selectedText = selection;
+
+            // IMPORTANT: NO e.preventDefault() –> the original browser menu opens as normal!
+
+            menuBtn.style.left = `${e.pageX - 40}px`;
+            menuBtn.style.top = `${e.pageY - 45}px`;
+            menuBtn.style.display = 'block';
+        } else {
+            menuBtn.style.display = 'none';
+        }
+    });
+
+    // Click on the Discogs button
+    menuBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (selectedText) {
+            const query = encodeURIComponent(selectedText);
+            const searchUrl = `https://discogs.com/search?q=${query}&type=all`;
+            GM_openInTab(searchUrl, { active: true, insert: true, setParent: true });
+        }
+        menuBtn.style.display = 'none';
+    });
+
+    document.addEventListener('mousedown', function(e) {
+        if (e.target !== menuBtn) {
+            menuBtn.style.display = 'none';
+        }
+    });
+})();
