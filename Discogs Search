@@ -2,7 +2,7 @@
 // @name         Discogs Search
 // @namespace    https://discogs.com
 // @version      1.2
-// @description  Displays the Discogs search button right next to the original browser context menu.
+// @description  display a Discogs search button right next to the original browser context menu
 // @author       80sKid
 // @match        *://*/*
 // @grant        GM_openInTab
