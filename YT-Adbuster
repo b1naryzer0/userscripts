@@ -1,0 +1,228 @@
+// ==UserScript==
+// @name         YouTube: Universal Ad-Blackout, Mute, Auto-Skip & 16x Speed
+// @namespace    http://tampermonkey.net
+// @version      1.1
+// @description  Schwärzt alle Werbungen, schaltet stumm, beschleunigt auf 16x, klickt "Überspringen" und blendet Banner aus.
+// @author       80sKid
+// @match        https://*.youtube.com/*
+// @match        https://youtube-nocookie.com/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    const AD_PLAYBACK_SPEED = 16.0; // Maximale Geschwindigkeit für Werbespots
+
+    let isBlockingActive = false;
+    let wasMutedBeforeAd = false;
+    let speedBeforeAd = 1.0;
+    let isTestMode = false;
+    let testTimeout = null;
+
+    // 1. Banner- und Seiten-Werbung per CSS ausblenden
+    function injectAdBlockStyles() {
+        if (document.getElementById('yt-custom-ad-styles')) return;
+
+        const style = document.createElement('style');
+        style.id = 'yt-custom-ad-styles';
+        style.textContent = `
+            /* Banner über den Videovorschlägen & in der Seitenleiste */
+            #player-ads,
+            #masthead-ad,
+            ytd-ad-slot-renderer,
+            ytd-banner-promo-renderer,
+            ytd-video-masthead-ad-v3-renderer,
+            ytd-primetime-promo-renderer,
+            ytd-in-feed-ad-layout-renderer,
+            ytd-display-ad-renderer,
+            ytd-promoted-sparkles-web-renderer,
+            ytd-promoted-video-renderer,
+            .ytd-merch-shelf-renderer,
+            /* Kleine Overlay-Banner unten im Video */
+            .ytp-ad-overlay-container,
+            .ytp-ad-text-overlay {
+                display: none !important;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // 2. Schwarzes Overlay für den Video-Player erstellen
+    function createBlackoutOverlay() {
+        let overlay = document.getElementById('universal-ad-blackout');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'universal-ad-blackout';
+            Object.assign(overlay.style, {
+                position: 'absolute',
+                top: '0',
+                left: '0',
+                width: '100%',
+                height: '100%',
+                backgroundColor: '#000000',
+                color: '#FFFFFF',
+                display: 'none',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                padding: '20px',
+                boxSizing: 'border-box',
+                zIndex: '40',
+                pointerEvents: 'none',
+                fontSize: 'clamp(16px, 3vw, 24px)',
+                fontWeight: 'bold',
+                fontFamily: 'YouTube Sans, Roboto, sans-serif'
+            });
+            overlay.innerText = 'Werbung wird ausgeblendet (16x)...';
+
+            const player = document.querySelector('#movie_player');
+            if (player) {
+                player.appendChild(overlay);
+            }
+        }
+        return overlay;
+    }
+
+    // 3. Blackout, Stummschaltung & 16x Geschwindigkeit aktivieren
+    function activateBlackout(video, overlay, applySpeed = true) {
+        if (overlay && overlay.style.display !== 'flex') {
+            overlay.style.display = 'flex';
+        }
+
+        // Ursprünglichen Ton- und Geschwindigkeits-Status einmalig merken
+        if (!isBlockingActive) {
+            wasMutedBeforeAd = video.muted;
+            speedBeforeAd = video.playbackRate || 1.0;
+            isBlockingActive = true;
+        }
+
+        // Stummschaltung erzwingen
+        if (!video.muted) {
+            video.muted = true;
+        }
+
+        // 16x Geschwindigkeit erzwingen (im Testmodus weglassen, damit dein Video nicht wegspringt)
+        if (applySpeed && video.playbackRate !== AD_PLAYBACK_SPEED) {
+            try {
+                video.playbackRate = AD_PLAYBACK_SPEED;
+            } catch (e) {
+                // Fallback, falls der Browser 16x bei einem Format limitiert
+                video.playbackRate = 8.0;
+            }
+        }
+    }
+
+    // 4. Normalzustand wiederherstellen
+    function deactivateBlackout(video, overlay) {
+        if (overlay && overlay.style.display !== 'none') {
+            overlay.style.display = 'none';
+        }
+        if (isBlockingActive) {
+            video.muted = wasMutedBeforeAd;
+            video.playbackRate = speedBeforeAd;
+            isBlockingActive = false;
+        }
+    }
+
+    // 5. "Überspringen"-Button automatisch klicken
+    function tryClickSkipButton() {
+        const skipSelectors = [
+            '.ytp-skip-ad-button',
+            '.ytp-ad-skip-button',
+            '.ytp-ad-skip-button-modern',
+            '.ytp-ad-skip-button-slot button'
+        ];
+
+        for (const selector of skipSelectors) {
+            const btn = document.querySelector(selector);
+            if (btn && btn.offsetParent !== null) {
+                btn.click();
+                break;
+            }
+        }
+    }
+
+    function checkAdStatus() {
+        injectAdBlockStyles();
+
+        const player = document.querySelector('#movie_player');
+        const video = document.querySelector('video');
+        if (!player || !video) return;
+
+        // Listener direkt an das Video hängen, falls YouTube Ton oder Speed zurücksetzt
+        if (!video.dataset.adListenersAttached) {
+            video.addEventListener('volumechange', () => {
+                if (isBlockingActive && !video.muted) {
+                    video.muted = true;
+                }
+            });
+            video.addEventListener('ratechange', () => {
+                if (isBlockingActive && !isTestMode && video.playbackRate !== AD_PLAYBACK_SPEED) {
+                    video.playbackRate = AD_PLAYBACK_SPEED;
+                }
+            });
+            video.dataset.adListenersAttached = 'true';
+        }
+
+        const overlay = createBlackoutOverlay();
+
+        // Test-Modus (Alt + T): Nur Blackout & Stumm testen, ohne 16x Vorspulen
+        if (isTestMode) {
+            activateBlackout(video, overlay, false);
+            return;
+        }
+
+        // Prüfen, ob gerade Werbung läuft
+        const isAdShowing = player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
+        if (isAdShowing) {
+            activateBlackout(video, overlay, true);
+            tryClickSkipButton();
+            return;
+        }
+
+        // Normalzustand wiederherstellen
+        deactivateBlackout(video, overlay);
+    }
+
+    // Test-Taste: Alt + T (3 Sekunden Test-Ausblendung)
+    document.addEventListener('keydown', function(e) {
+        if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) {
+            return;
+        }
+
+        if (e.altKey && e.key.toLowerCase() === 't') {
+            e.preventDefault();
+            clearTimeout(testTimeout);
+            isTestMode = true;
+            checkAdStatus();
+
+            testTimeout = setTimeout(() => {
+                isTestMode = false;
+                checkAdStatus();
+            }, 3000);
+        }
+    });
+
+    // Überwacht Änderungen im Player und auf der Seite
+    const observer = new MutationObserver(() => {
+        checkAdStatus();
+    });
+
+    function init() {
+        injectAdBlockStyles();
+        if (document.body) {
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['class', 'style']
+            });
+            checkAdStatus();
+        } else {
+            setTimeout(init, 200);
+        }
+    }
+
+    init();
+})();
