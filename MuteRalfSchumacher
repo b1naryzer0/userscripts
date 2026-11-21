@@ -1,27 +1,24 @@
 // ==UserScript==
-// @name         YouTube: Ralf Schumacher Ad-Blocker (Mute & Blackout + Embeds)
+// @name         YouTube: Ralf Schumacher Ad-Blocker (Werbung & direkte Videos)
 // @namespace    http://violentmonkey.net
-// @version      1.3
-// @description  Schwärzt das Video mit Hinweis-Text, schaltet stumm und funktioniert auch bei eingebetteten Videos.
+// @version      1.4
+// @description  Schwärzt Werbung UND direkte Videos mit Ralf Schumacher / wirkaufendeinauto.de und schaltet sie stumm.
 // @author       80sKid
-// @match        https://youtube.com/*
+// @match        https://*.youtube.com/*
 // @match        https://youtube-nocookie.com/*
-// @match        https://www.youtube.com/*
 // @grant        none
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // Schlüsselwörter, auf die reagiert werden soll (Kleinschreibung verwenden)
-    const KEYWORDS = ['ralf schumacher', 'ralf-schumacher', 'wirkaufendeinauto'];
+    const KEYWORDS = ['ralf schumacher', 'ralf-schumacher', 'wirkaufendeinauto', 'schumachers empfehlung'];
 
-    let isMutedByScript = false;
+    let isBlockingActive = false;
     let wasMutedBeforeAd = false;
     let isTestMode = false;
     let testTimeout = null;
 
-    // Erstellt ein schwarzes Overlay mit weißem Schriftzug für den Video-Player
     function createBlackoutOverlay() {
         let overlay = document.getElementById('ralf-ad-blackout');
         if (!overlay) {
@@ -43,7 +40,7 @@
                 boxSizing: 'border-box',
                 zIndex: '40',
                 pointerEvents: 'none',
-                fontSize: 'clamp(16px, 3vw, 24px)', // Passt sich flexibel an kleine Embed-Player an
+                fontSize: 'clamp(16px, 3vw, 24px)',
                 fontWeight: 'bold',
                 fontFamily: 'YouTube Sans, Roboto, sans-serif'
             });
@@ -58,13 +55,19 @@
     }
 
     function activateBlackout(video, overlay) {
-        if (overlay.style.display !== 'flex') {
+        if (overlay && overlay.style.display !== 'flex') {
             overlay.style.display = 'flex';
         }
-        if (!isMutedByScript) {
+
+        // Ursprünglichen Ton-Status nur beim allerersten Aktivieren merken
+        if (!isBlockingActive) {
             wasMutedBeforeAd = video.muted;
+            isBlockingActive = true;
+        }
+
+        // Stummschaltung konsequent erzwingen, falls YouTube sie zurücksetzt
+        if (!video.muted) {
             video.muted = true;
-            isMutedByScript = true;
         }
     }
 
@@ -72,10 +75,16 @@
         if (overlay && overlay.style.display !== 'none') {
             overlay.style.display = 'none';
         }
-        if (isMutedByScript) {
+        if (isBlockingActive) {
             video.muted = wasMutedBeforeAd;
-            isMutedByScript = false;
+            isBlockingActive = false;
         }
+    }
+
+    function containsKeyword(text) {
+        if (!text) return false;
+        const lowerText = text.toLowerCase();
+        return KEYWORDS.some(keyword => lowerText.includes(keyword));
     }
 
     function checkAdStatus() {
@@ -83,26 +92,40 @@
         const video = document.querySelector('video');
         if (!player || !video) return;
 
+        // Listener direkt an das Video hängen, falls YouTube den Ton ändert
+        if (!video.dataset.ralfListenerAttached) {
+            video.addEventListener('volumechange', () => {
+                if (isBlockingActive && !video.muted) {
+                    video.muted = true;
+                }
+            });
+            video.dataset.ralfListenerAttached = 'true';
+        }
+
         const overlay = createBlackoutOverlay();
 
-        // Wenn der Test-Modus aktiv ist, Blackout erzwingen
+        // 1. Test-Modus (Alt + T)
         if (isTestMode) {
             activateBlackout(video, overlay);
             return;
         }
 
-        // Prüfen, ob gerade grundsätzlich Werbung läuft
+        // 2. Prüfen, ob gerade ein Werbespot (Ad) läuft
         const isAdShowing = player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
-
         if (isAdShowing) {
-            // Text aus dem Werbe-Overlay und den Werbe-Infos auslesen
             const adModule = document.querySelector('.ytp-ad-player-overlay, .ytp-ad-player-overlay-layout');
-            const adText = adModule ? adModule.innerText.toLowerCase() : '';
+            const adText = adModule ? adModule.innerText : '';
+            if (containsKeyword(adText)) {
+                activateBlackout(video, overlay);
+                return;
+            }
+        } else {
+            // 3. Prüfen, ob das reguläre Video selbst ein Werbevideo ist
+            const videoTitle = document.querySelector('h1.ytd-watch-metadata, .ytp-title-link')?.innerText || document.title;
+            const channelName = document.querySelector('#owner #channel-name, .ytp-title-channel-name')?.innerText || '';
+            const description = document.querySelector('#description-inline-expander')?.innerText || '';
 
-            // Prüfen, ob eines der Schlüsselwörter vorkommt
-            const isTargetAd = KEYWORDS.some(keyword => adText.includes(keyword));
-
-            if (isTargetAd) {
+            if (containsKeyword(videoTitle) || containsKeyword(channelName) || containsKeyword(description)) {
                 activateBlackout(video, overlay);
                 return;
             }
@@ -112,7 +135,7 @@
         deactivateBlackout(video, overlay);
     }
 
-    // Test-Taste: Alt + T (löst 3 Sekunden Test-Ausblendung aus)
+    // Test-Taste: Alt + T
     document.addEventListener('keydown', function(e) {
         if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) {
             return;
@@ -131,21 +154,20 @@
         }
     });
 
-    // Überwacht Änderungen im YouTube-Player in Echtzeit
+    // Überwacht Änderungen auf der gesamten Seite
     const observer = new MutationObserver(() => {
         checkAdStatus();
     });
 
-    // Startet die Überwachung, sobald der Player geladen ist
     function init() {
-        const player = document.querySelector('#movie_player');
-        if (player) {
-            observer.observe(player, {
+        if (document.body) {
+            observer.observe(document.body, {
                 childList: true,
                 subtree: true,
                 attributes: true,
                 attributeFilter: ['class']
             });
+            checkAdStatus();
         } else {
             setTimeout(init, 500);
         }
